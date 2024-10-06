@@ -1,1 +1,1 @@
-This project is part of Udacity's Nanodegree program "AI Programming with Python"
+This project is to be submitted for evaluation for Udacity's Nanodegree program "AI Programming with Python"
