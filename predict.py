@@ -13,6 +13,7 @@ from PIL import Image
 import numpy as np
 import torch.nn.functional as F
 import argparse
+import matplotlib.pyplot as plt
 import train
 
 # image_dataset
@@ -71,7 +72,6 @@ def process_image(image_path):
     return image_tensor  # This will be a tensor
 
 
-
 topk = args.top_k
 def predict(path_to_image, model, topk=topk):
     """
@@ -118,10 +118,34 @@ def predict(path_to_image, model, topk=topk):
     
     return top_probs, top_classes
 
-prediction = predict(path_to_image, model, topk)
-for (a, b) in prediction:
-    print(f"Prediction class : {b}, Predicted probability : {a}")
+def imshow(image, ax=None, title=None):
+    """Imshow for Tensor."""
+    if ax is None:
+        fig, ax = plt.subplots()
     
+    # PyTorch tensors assume the color channel is the first dimension
+    # but matplotlib assumes is the third dimension
+    image = image.numpy().transpose((1, 2, 0))
+    
+    # Undo preprocessing
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    image = std * image + mean
+    
+    # Image needs to be clipped between 0 and 1 or it looks like noise when displayed
+    image = np.clip(image, 0, 1)
+    
+    ax.imshow(image)
+    
+    return ax
+
+probs, classes = predict(path_to_image, model, topk)
+
+print("Top Probabilities:", probs)
+print("Top Classes:", classes)
+
+imshow(process_image(image_path1))
+plt.barh(classes, probs)
 
 if __name__ == "__main__":
     main()
