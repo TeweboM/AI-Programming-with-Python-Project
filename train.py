@@ -14,17 +14,19 @@ import requests
 import tarfile
 import os
 import shutil
+import matplotlib.pyplot as plt
 
 
 def get_input_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('data_dir', type=str, help='Working directory.')
     parser.add_argument('--save_dir', type=str, default='flower_classification_model.pth', help='save directory.')
-    parser.add_argument('--arch', type=str, default='vgg11', help='model architecture.')
+    parser.add_argument('--arch', choices=['vgg11', 'resnet18'], required=True, help="Model architecture: vgg11 or resnet18")
     parser.add_argument('--gpu', type=str, default='gpu', help='GPU or CPU.')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate.')
-    parser.add_argument('--hidden_units', type=int, default=512, help='hidden unit.')
-    parser.add_argument('--epochs', type=int, default=20, help='epochs.')
+    parser.add_argument('--hidden_layers', nargs='+', type=int, help="List of hidden layers, e.g., --hidden_layers 512 256 128", required=True)
+    #parser.add_argument('--hidden_units', type=int, default=512, help='hidden unit.')
+    parser.add_argument('--epochs', type=int, default=10, help='epochs.')
     return parser.parse_args()
 
 def check_command_line_arguments(in_arg):
@@ -105,20 +107,16 @@ data_transforms = {
     "train": transforms.Compose([
         transforms.RandomHorizontalFlip(0.5),
         transforms.RandomResizedCrop(size=(224, 224), antialias=True),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.ToTensor()       
     ]),
     "valid": transforms.Compose([
         transforms.Resize(256),  # Resize the shorter side to 256 pixels
         transforms.CenterCrop(224),  # Center crop to 224x224
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.ToTensor()        
     ])
 }
-
-
-
-model.class_to_idx = image_datasets['train'].class_to_idx
 
 # TODO: Load the datasets with ImageFolder
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'valid']} 
@@ -127,27 +125,57 @@ image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transf
 
 dataset_size = {x: len(image_datasets[x]) for x in ['train', 'valid']}
 
+with open('cat_to_name.json', 'r') as f:
+    cat_to_name = json.load(f)
+    
+for old_key, new_key in cat_to_name.items():
+    image_datasets['train'].class_to_idx[new_key] = image_datasets['train'].class_to_idx.pop(old_key)
+    
+image_datasets['train'].class_to_idx = {v:k for k, v in image_datasets['train'].class_to_idx.items()}
+
 train_loader = torch.utils.data.DataLoader(image_datasets['train'], batch_size=32, shuffle=True)
 valid_loader = torch.utils.data.DataLoader(image_datasets['valid'], batch_size=32, shuffle=False)
 
 
 # Load the pre-trained VGG11 model
 arch = in_arg.arch
+
 model = models.arch(pretrained=True)
+
+hidden_layers = in_arg.hidden_layers
 
 # Freeze all the layers except for the classifier
 for param in model.parameters():
     param.requires_grad = False
 
 # Replace the classifier (fully connected layers) with a new one
-model.classifier[6] = nn.Linear(4096, len(image_datasets['train'].classes))  # Assuming the number of classes matches the dataset
+input_size = model.classifier[0].in_features
+
+layers = []
+
+# First hidden layer connects input_size to the first hidden layer size
+layers.append(nn.Linear(input_size, hidden_layers[0]))
+layers.append(nn.ReLU())
+layers.append(nn.Dropout(0.2))
+
+# Add hidden layers as per user input
+for i in range(len(hidden_layers) - 1):
+    layers.append(nn.Linear(hidden_layers[i], hidden_layers[i + 1]))
+    layers.append(nn.ReLU())
+    layers.append(nn.Dropout(0.5))
+
+layers.append(nn.Linear(hidden_layers[-1], 1000))
+
+model.classifier = nn.Sequential(*layers)
 
 # Move the model to the GPU if available
 model = model.to(device)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
+
 lr = in_arg.learning_rate
+
 optimizer = optim.SGD(model.classifier.parameters(), lr=lr, momentum=0.9)  # Only optimizing classifier parameters
 
 # Training and validation data loaders
@@ -211,13 +239,14 @@ for epoch in range(num_epochs):
 
 print('Training complete')
 
+model.class_to_idx = image_datasets['train'].class_to_idx
 
 # Assuming test dataset is in '/path/to/test_data' and similar transforms
 test_transforms = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    transforms.ToTensor()
 ])
 
 # Load the test dataset
